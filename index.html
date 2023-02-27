@@ -64,6 +64,11 @@ button {
   margin:3px;
 }
 
+button:hover {
+    cursor: pointer;
+    background-color: #154785;
+}
+
 .submitbutton {
   display: block;
   width: 100%;
@@ -98,14 +103,19 @@ input[type="checkbox"] {
   opacity: 0;
 }
 
+input[type="checkbox"]:hover {
+    cursor: pointer;
+    background-color: rgb(245, 245, 245);
+}
+
 [type="checkbox"]:checked+* {
     background-color: silver;
-    border: 1px dashed rgb(33, 159, 201);
+    border: 2px solid rgb(12, 77, 99);
 }
 
 [type="checkbox"]:not(:checked)+* {
     background-color: white;
-    border: 1px solid white;
+    border: 2px solid white;
 }
 
 </style>
