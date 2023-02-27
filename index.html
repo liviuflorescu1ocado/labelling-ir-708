@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+
+.leftpane {
+  height: 100%;
+  width: 20%;
+  position: fixed;
+  z-index: 1;
+  bottom: 0;
+  overflow: hidden;
+  left: 0;
+  background-color: rgb(232, 243, 255);
+}
+
+.rightpane {
+  height: 100%;
+  width: 80%;
+  position: fixed;
+  z-index: 1;
+  bottom: 0;
+  overflow-x: hidden;
+  right: 0;
+}
+
+.selectable {
+  border-top: 1px solid rgb(232, 243, 255);
+  display: block;
+  padding: 5px;
+}
+
+.padded {
+  margin: 10px;
+  position:absolute;
+  bottom:0;
+  top:0;
+  left:0;
+  right:0;
+  flex-direction: column;
+  display: flex;
+}
+
+.scrollable {
+  flex: 1;
+  overflow-y: auto;
+  overflow-wrap: break-word;
+}
+
+.selector {
+  background-color: white;
+}
+
+button {
+  background-color: #2876D4;
+  color: white;
+  padding: 8px;
+  border-radius: 4px;
+  border: none;
+  flex-basis: 100%;
+  font-size: 16px;
+  width:100%;
+  margin:3px;
+}
+
+.submitbutton {
+  display: block;
+  width: 100%;
+  margin:0px;
+}
+
+.buttonthird {
+  display: inline-block;
+  width: 33.33%;
+  padding: 2px;
+}
+
+.threebuttons {
+  display: flex;
+  width:100%;
+}
+
+[type="button"]:enabled {
+    opacity: 1;
+}
+
+[type="button"]:not(:enabled) {
+    opacity: 0.2;
+}
+
+label {
+  display: block;
+}
+
+input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+}
+
+[type="radio"]:checked+* {
+    background-color: silver;
+}
+
+[type="radio"]:not(:checked)+* {
+    background-color: white;
+}
+
+</style>
+
+<script src="https://unpkg.com/@panzoom/panzoom@4.5.0/dist/panzoom.min.js"></script>
+
+<script src="https://api.labelbox.com/static/labeling-api.js"></script>
+
+</head>
+<body>
+
+<div class="leftpane">
+  <div class="padded">
+   <div class="scrollable">
+    <a href="https://app.labelbox.com">&lt;- Back to labelbox</a>
+    
+    <p id="assetExternalId">Loading...</p>
+    
+    <div id="questionList"></div>
+   </div> 
+    
+    <div class="bottombuttons">
+        <div class="threebuttons"><button type="button" id="back" onclick="goBack()">Last Image</button><button type="button" id="skip" onclick="skip()">Skip Image</button><button type="button" id="next" onclick="goNext()">Next Image</button></div>
+        <button class="submitbutton" id="submit" type="button" onclick="submit()">Submit (e)</button>
+    </div>
+    
+  </div>
+</div>
+
+<div class="rightpane">
+    <img id="imageToLabel" width="100%" src="">
+</div>
+
+<script>
+  const elem = document.getElementById('imageToLabel');
+
+  const panzoom = Panzoom(elem, { canvas: true })
+  const parent = elem.parentElement
+  parent.addEventListener('wheel', panzoom.zoomWithWheel)
+  /*parent.addEventListener('wheel', function(event) {
+    if (!event.shiftKey) return
+    panzoom.zoomWithWheel(event)
+  })*/
+</script>
+
+<script>
+  let state = {
+    projectId: new URL(window.location.href).searchParams.get("project"),
+    currentAsset: undefined,
+    preloadedAsset: undefined,
+    ongoingSubmit: undefined,
+  };
+
+  function populateQuestion({ type, name, options, instructions }, answer) {
+    optionList = options.map(({ value, label }) => {
+        cs = (answer || []).indexOf(value) !== -1 ? "checked" : "";
+        return `<label><input type="checkbox" id="${value}" name="${name}" onclick="selectionMade()" value="${value}" ${cs} ><span class="selectable">${label}</span></label>`;
+    }).join("");
+    
+    return `<h3>${instructions}</h3><div class="selector" id="${name}">` + optionList + `</div>`
+  }
+
+  function asyncLoadImage(url) {
+    return new Promise((resolve) => {
+      const img = document.createElement('img');
+      img.src = url;
+      img.onload = () => {
+        img.remove();
+        resolve();
+      };
+      img.style.display = 'none',
+      img.style.width = '0px',
+      img.style.height = '0px',
+      document.body.appendChild(img);
+    });
+  }
+
+  function preloadFunction(asset) {
+    state.preloadedAsset = asset;
+    return asyncLoadImage(asset.data);
+  }
+
+  Labelbox.enablePreloading({preloadFunction})
+
+  function createQuestion(question, answers) {
+    const optionalAnswer = (answers || {})[question.name];
+    return populateQuestion(question, optionalAnswer);
+  }
+
+  let classifications = [];
+  let markQuestionsAsLoaded;
+  new Promise(resolve => {
+    markQuestionsAsLoaded = resolve;
+  }).then(() => {
+    Labelbox.currentAsset().subscribe(asset => {
+      if (asset) {
+        maybeDrawAsset(asset);
+      }
+    });
+  });
+
+  function drawQuestions(classifications, answers) {
+    document.getElementById('questionList').innerHTML = classifications
+      .map(classification => createQuestion(classification, answers))
+      .join("");
+  }
+
+  Labelbox.getTemplateCustomization().subscribe(customization => {
+    classifications = customization.classifications;
+    drawQuestions(classifications);
+    markQuestionsAsLoaded();
+  });
+
+  function skip() {
+    state.preloadedAsset = undefined;
+    Labelbox.skip().then(() => {
+      Labelbox.fetchNextAssetToLabel();
+    });
+  }
+
+  function getLabel() {
+  
+    answers = Array.from(document.getElementById('questionList').querySelectorAll("div"))
+        .map(node => {
+        const key = node.getAttribute("id");
+        const inputs = Array.from(node.querySelectorAll("input"));
+        const selected = inputs.find(child => child.checked);
+        return {
+          [key]: selected && selected.getAttribute("value")
+        };
+      });
+
+    return Object.assign({}, ...answers);
+  }
+
+  function submit() {
+    if (document.getElementById("submit").disabled || Boolean(state.ongoingSubmit))
+        return;
+  
+    const label = JSON.stringify(getLabel());
+    const jumpToNext = Boolean(!state.currentAsset.label);
+    state.ongoingSubmit = state.currentAsset
+    Labelbox.setLabelForAsset(label).then(() => {
+      state.ongoingSubmit = undefined
+      if (jumpToNext) {
+        Labelbox.fetchNextAssetToLabel();
+      }
+    });
+    document.getElementById("submit").disabled = true
+    if (jumpToNext) {
+      if (state.preloadedAsset) {
+        drawAsset(state.preloadedAsset)
+        state.preloadedAsset = undefined
+      } else {
+        document.getElementById('imageToLabel').src = ""
+      }
+      panzoom.reset()
+    }
+  }
+
+  function goBack() {
+    if (document.getElementById("back").disabled)
+        return;
+    state.preloadedAsset = undefined;
+    if (state.currentAsset.previous) {
+      Labelbox.setLabelAsCurrentAsset(state.currentAsset.previous);
+    }
+  }
+
+  function goNext() {
+    if (document.getElementById("next").disabled)
+        return;
+    state.preloadedAsset = undefined;
+    if (state.currentAsset.next) {
+      Labelbox.setLabelAsCurrentAsset(state.currentAsset.next);
+    } else {
+      Labelbox.fetchNextAssetToLabel();
+    }
+  }
+
+  function maybeDrawAsset(asset) {
+      if ((state.ongoingSubmit && state.ongoingSubmit.id) == asset.id) {
+          console.log("Not redrawing asset during submit...")
+      } else {
+          drawAsset(asset)
+      }
+  }
+  
+  function selectionMade() {
+      document.getElementById("submit").disabled = false
+      return true
+  }
+
+  function drawAsset(asset) {
+    document.getElementById("back").disabled = !Boolean(asset.previous);  
+    document.getElementById("next").disabled = !Boolean(asset.next || asset.label);
+    //document.getElementById("submit").disabled = true;
+
+    if ((state.currentAsset && state.currentAsset.data) !== asset.data) {
+      document.getElementById('imageToLabel').src=asset.data;
+    }
+    if ((state.currentAsset && state.currentAsset.id) !== asset.id) {
+      document.getElementById('assetExternalId').innerHTML=asset.externalId;
+      if (asset.label) {
+        try {
+          const label = JSON.parse(asset.label);
+          drawQuestions(classifications, label);
+        } catch (e) {
+          console.log("failed to read label", e);
+        }
+      } else {
+        drawQuestions(classifications);
+      }
+    }
+    state = {
+      ...state,
+      currentAsset: asset
+    };
+  }
+  
+  function doc_keyUp(e) {
+    if (e.key === 'e') {
+        submit();
+    }
+  }
+  
+  document.addEventListener('keyup', doc_keyUp, false);
+  
+</script>
+
+</body>
+</html> 
