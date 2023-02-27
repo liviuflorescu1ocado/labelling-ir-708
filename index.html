@@ -230,9 +230,11 @@ input[type="radio"] {
         .map(node => {
         const key = node.getAttribute("id");
         const inputs = Array.from(node.querySelectorAll("input"));
-        const selected = inputs.find(child => child.checked);
+        const value = inputs
+          .filter(child => child.checked)
+          .map(child => child.getAttribute("value"));
         return {
-          [key]: selected && selected.getAttribute("value")
+          [key]: value
         };
       });
 
